@@ -303,6 +303,8 @@ Semantisk søk og analyse for norske lover og forskrifter.
     )
 
 if __name__ == "__main__":
-    # Bind to Render/Railway provided port
+    import os
     port = int(os.getenv("PORT", 7860))
+    print(f"Starting Gradio on 0.0.0.0:{port}", flush=True)
     demo.launch(server_name="0.0.0.0", server_port=port)
+
