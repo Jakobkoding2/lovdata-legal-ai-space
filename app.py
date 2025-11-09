@@ -1,321 +1,308 @@
 #!/usr/bin/env python3
 """
-Lovdata Legal AI - Gradio Interface for Hugging Face Spaces
-Provides a web interface for semantic search and legal Q&A
+Lovdata Legal AI – Gradio interface
+Semantic search and overlap analysis for Norwegian legal texts.
 """
 
 import os
-import gradio as gr
-import numpy as np
-import pandas as pd
 from pathlib import Path
 import json
+import numpy as np
+import pandas as pd
+import gradio as gr
 
-# Import required libraries
+# Optional deps: installed via requirements.txt
 try:
     from sentence_transformers import SentenceTransformer
     import faiss
     import joblib
 except ImportError:
-    print("Installing required packages...")
-    os.system("pip install sentence-transformers faiss-cpu scikit-learn joblib pandas pyarrow")
+    print("Installing required packages at runtime...")
+    os.system("pip install -q sentence-transformers faiss-cpu scikit-learn joblib pandas pyarrow")
     from sentence_transformers import SentenceTransformer
     import faiss
     import joblib
 
-# Configuration
+# Paths
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data" / "processed"
 MODELS_DIR = BASE_DIR / "models"
 
-# Global variables
+# Globals
 corpus_df = None
 embeddings = None
 faiss_index = None
 embedding_model = None
 overlap_classifier = None
 
+
 def load_models():
-    """Load all models and data"""
+    """Load models and any local artifacts if present. Tolerant to missing files."""
     global corpus_df, embeddings, faiss_index, embedding_model, overlap_classifier
-    
+
     print("Loading models and data...")
-    
-    # Load corpus
+
+    corpus_df = None
+    embeddings = None
+    faiss_index = None
+    overlap_classifier = None
+
+    # Try local corpus
     corpus_path = DATA_DIR / "lovdata_corpus.parquet"
     if corpus_path.exists():
-        corpus_df = pd.read_parquet(corpus_path).head(20000)
-        print(f"✓ Loaded corpus: {len(corpus_df)} texts")
-    
-    # Load embeddings
-    embeddings_path = MODELS_DIR / "lovdata_embeddings.npy"
-    if embeddings_path.exists():
-        embeddings = np.load(embeddings_path)
-        print(f"✓ Loaded embeddings: {embeddings.shape}")
-    
-    # Load FAISS index
+        try:
+            # Limit for demo to reduce RAM
+            corpus_df = pd.read_parquet(corpus_path).head(20000)
+            print(f"✓ Loaded corpus: {len(corpus_df)} texts")
+        except Exception as e:
+            print(f"Corpus load skipped: {e}")
+
+    # Try local embeddings
+    emb_path = MODELS_DIR / "lovdata_embeddings.npy"
+    if emb_path.exists():
+        try:
+            embeddings = np.load(emb_path)
+            print(f"✓ Loaded embeddings: {embeddings.shape}")
+        except Exception as e:
+            print(f"Embeddings load skipped: {e}")
+
+    # Try local FAISS index
     index_path = MODELS_DIR / "lovdata_faiss.index"
     if index_path.exists():
-        faiss_index = faiss.read_index(str(index_path))
-        print(f"✓ Loaded FAISS index: {faiss_index.ntotal} vectors")
-    
-    # Load embedding model
-    embedding_model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    print(f"✓ Loaded embedding model")
-    
-    # Load overlap classifier
-    classifier_path = MODELS_DIR / "overlap_classifier.joblib"
-    if classifier_path.exists():
-        overlap_classifier = joblib.load(classifier_path)
-        print(f"✓ Loaded overlap classifier")
-    
-    print("All models loaded successfully!")
+        try:
+            faiss_index = faiss.read_index(str(index_path))
+            print(f"✓ Loaded FAISS index: {faiss_index.ntotal} vectors")
+        except Exception as e:
+            print(f"Index load skipped: {e}")
 
-def semantic_search(query, top_k=5, min_similarity=0.7):
-    """Perform semantic search"""
-    if embedding_model is None or faiss_index is None or corpus_df is None:
-        return "⚠️ Models not loaded. Please refresh the page."
-    
-    # Generate query embedding
-    query_embedding = embedding_model.encode(
-        [query],
-        convert_to_numpy=True,
-        normalize_embeddings=True
+    # Embedding model from HF (CPU)
+    embedding_model = SentenceTransformer(
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    )
+    print("✓ Loaded embedding model")
+
+    # Optional classifier
+    clf_path = MODELS_DIR / "overlap_classifier.joblib"
+    if clf_path.exists():
+        try:
+            overlap_classifier = joblib.load(clf_path)
+            print("✓ Loaded overlap classifier")
+        except Exception as e:
+            print(f"Classifier load skipped: {e}")
+
+    print("Models ready.")
+
+
+def semantic_search(query: str, top_k: int = 5, min_similarity: float = 0.7):
+    """Semantic search using FAISS index + corpus."""
+    if embedding_model is None:
+        return "⚠️ Embedding model not loaded."
+    if faiss_index is None or corpus_df is None:
+        return "⚠️ Index or corpus not loaded. Last ned/bygg index først."
+
+    # Query embedding
+    q_emb = embedding_model.encode(
+        [query], convert_to_numpy=True, normalize_embeddings=True
     ).astype(np.float32)
-    
-    # Search FAISS index
-    distances, indices = faiss_index.search(query_embedding, top_k * 2)
-    similarities = distances[0]
-    
-    # Format results
+
+    # Search
+    distances, indices = faiss_index.search(q_emb, top_k * 2)
+    sims = distances[0]
+
     results = []
-    for idx, similarity in zip(indices[0], similarities):
-        if similarity < min_similarity or idx >= len(corpus_df):
+    for idx, sim in zip(indices[0], sims):
+        if idx < 0 or idx >= len(corpus_df):
             continue
-        
+        if sim < min_similarity:
+            continue
+
         row = corpus_df.iloc[idx]
-        
-        results.append({
-            "Similarity": f"{similarity:.2%}",
-            "Document": row['doc_title'],
-            "Section": row.get('section_num', 'N/A'),
-            "Type": row['group'],
-            "Text": row['text_clean'][:300] + "..." if len(row['text_clean']) > 300 else row['text_clean']
-        })
-        
+        text = row.get("text_clean") or row.get("text") or ""
+        snippet = (text[:300] + "...") if len(text) > 300 else text
+
+        results.append(
+            {
+                "Similarity": f"{sim:.2%}",
+                "Document": row.get("doc_title", "Ukjent"),
+                "Section": row.get("section_num", "N/A"),
+                "Type": row.get("group", "N/A"),
+                "Text": snippet,
+            }
+        )
         if len(results) >= top_k:
             break
-    
-    if not results:
-        return "No results found. Try a different query or lower the similarity threshold."
-    
-    # Format as markdown table
-    output = f"### Found {len(results)} results for: '{query}'\n\n"
-    for i, result in enumerate(results, 1):
-        output += f"**{i}. {result['Document']} § {result['Section']}** ({result['Type']}) - Similarity: {result['Similarity']}\n\n"
-        output += f"> {result['Text']}\n\n"
-        output += "---\n\n"
-    
-    return output
 
-def detect_overlap(text1, text2):
-    """Detect semantic overlap between two texts"""
-    if embedding_model is None or overlap_classifier is None:
-        return "⚠️ Models not loaded. Please refresh the page."
-    
+    if not results:
+        return "Ingen treff. Prøv et annet søk eller senk terskelen."
+
+    out = [f"### Fant {len(results)} treff for: '{query}'\n"]
+    for i, r in enumerate(results, 1):
+        out.append(
+            f"**{i}. {r['Document']} § {r['Section']}** ({r['Type']}) "
+            f"- Similaritet: {r['Similarity']}\n\n> {r['Text']}\n\n---\n"
+        )
+    return "".join(out)
+
+
+def detect_overlap(text1: str, text2: str):
+    """Classify semantic overlap between two texts."""
+    if embedding_model is None:
+        return "⚠️ Embedding model ikke lastet."
     if not text1 or not text2:
-        return "Please provide both texts."
-    
-    # Generate embeddings
-    embeddings_pair = embedding_model.encode(
-        [text1, text2],
-        convert_to_numpy=True,
-        normalize_embeddings=True
+        return "Skriv inn begge tekster."
+
+    emb_pair = embedding_model.encode(
+        [text1, text2], convert_to_numpy=True, normalize_embeddings=True
     )
-    
-    # Compute similarity
-    similarity = float(np.dot(embeddings_pair[0], embeddings_pair[1]))
-    
-    # Extract features
-    len1 = len(text1)
-    len2 = len(text2)
-    words1 = set(text1.lower().split())
-    words2 = set(text2.lower().split())
-    
+    similarity = float(np.dot(emb_pair[0], emb_pair[1]))
+
+    # Basic features
+    len1, len2 = len(text1), len(text2)
+    words1, words2 = set(text1.lower().split()), set(text2.lower().split())
     features = {
-        'similarity': similarity,
-        'len_ratio': min(len1, len2) / max(len1, len2) if max(len1, len2) > 0 else 0,
-        'len_diff': abs(len1 - len2),
-        'word_overlap': len(words1 & words2) / len(words1 | words2) if len(words1 | words2) > 0 else 0,
-        'same_doc': 0,
-        'cross_group': 0,
-        'avg_length': (len1 + len2) / 2,
-        'max_length': max(len1, len2),
-        'min_length': min(len1, len2)
+        "similarity": similarity,
+        "len_ratio": min(len1, len2) / max(len1, len2) if max(len1, len2) else 0.0,
+        "len_diff": abs(len1 - len2),
+        "word_overlap": len(words1 & words2) / len(words1 | words2) if (words1 | words2) else 0.0,
+        "same_doc": 0,
+        "cross_group": 0,
+        "avg_length": (len1 + len2) / 2.0,
+        "max_length": max(len1, len2),
+        "min_length": min(len1, len2),
     }
-    
-    # Predict overlap type
-    classifier = overlap_classifier['classifier']
-    feature_names = overlap_classifier['feature_names']
-    
+
+    if overlap_classifier is None:
+        # Heuristic if classifier missing
+        label = "duplicate" if similarity >= 0.92 else ("subsumption" if similarity >= 0.80 else "different")
+        return (
+            "### Overlap Analysis\n\n"
+            f"**Similarity Score**: {similarity:.2%}\n\n"
+            f"**Overlap Type**: {label.upper()}\n\n"
+            "*(Klassifiseringsmodell ikke lastet. Heuristikk brukt.)*"
+        )
+
+    clf = overlap_classifier["classifier"]
+    feature_names = overlap_classifier["feature_names"]
     X = np.array([[features[col] for col in feature_names]])
-    prediction = classifier.predict(X)[0]
-    probabilities = classifier.predict_proba(X)[0]
-    
-    # Format output
-    output = f"### Overlap Analysis\n\n"
-    output += f"**Similarity Score**: {similarity:.2%}\n\n"
-    output += f"**Overlap Type**: {prediction.upper()}\n\n"
-    output += f"**Probabilities**:\n"
-    for label, prob in zip(classifier.classes_, probabilities):
-        output += f"- {label}: {prob:.2%}\n"
-    
-    output += f"\n**Interpretation**:\n"
-    if prediction == 'duplicate':
-        output += "✅ The texts are nearly identical. This indicates potential duplication."
-    elif prediction == 'subsumption':
-        output += "⚠️ One text contains or implies the other. This may indicate subsumption."
+    pred = clf.predict(X)[0]
+    probs = clf.predict_proba(X)[0]
+
+    lines = [
+        "### Overlap Analysis\n",
+        f"**Similarity Score**: {similarity:.2%}\n\n",
+        f"**Overlap Type**: {pred.upper()}\n\n",
+        "**Probabilities:**\n",
+    ]
+    for label, p in zip(clf.classes_, probs):
+        lines.append(f"- {label}: {p:.2%}\n")
+
+    lines.append("\n**Interpretation**:\n")
+    if pred == "duplicate":
+        lines.append("✅ Tekstene er nesten identiske. Mulig duplisering.")
+    elif pred == "subsumption":
+        lines.append("⚠️ Den ene teksten impliserer/omfatter den andre. Mulig subsumsjon.")
     else:
-        output += "ℹ️ The texts are semantically different."
-    
-    return output
+        lines.append("ℹ️ Tekstene er semantisk ulike.")
+    return "".join(lines)
+
 
 def get_statistics():
-    """Get system statistics"""
+    """Return simple system stats."""
+    lines = ["### System Statistics\n\n"]
     if corpus_df is None:
-        return "Models not loaded yet."
-    
-    stats = f"""
-### System Statistics
+        lines.append("Modeller/korpos ikke lastet.\n")
+    else:
+        laws = int((corpus_df.get("group") == "law").sum()) if "group" in corpus_df else "N/A"
+        regs = int((corpus_df.get("group") == "regulation").sum()) if "group" in corpus_df else "N/A"
+        uniq_docs = int(corpus_df.get("doc_id").nunique()) if "doc_id" in corpus_df else "N/A"
+        lines += [
+            "**Corpus Information:**\n",
+            f"- Total texts: {len(corpus_df):,}\n",
+            f"- Laws: {laws}\n",
+            f"- Regulations: {regs}\n",
+            f"- Unique documents: {uniq_docs}\n\n",
+        ]
 
-**Corpus Information:**
-- Total texts: {len(corpus_df):,}
-- Laws: {len(corpus_df[corpus_df['group'] == 'law']):,}
-- Regulations: {len(corpus_df[corpus_df['group'] == 'regulation']):,}
-- Unique documents: {corpus_df['doc_id'].nunique():,}
+    dim = embeddings.shape[1] if isinstance(embeddings, np.ndarray) else "N/A"
+    vecs = embeddings.shape[0] if isinstance(embeddings, np.ndarray) else "N/A"
+    indexed = faiss_index.ntotal if faiss_index is not None else "N/A"
+    lines += [
+        "**Embeddings:**\n",
+        f"- Dimension: {dim}\n",
+        f"- Total vectors: {vecs}\n\n",
+        "**Index:**\n",
+        "- Type: FAISS Flat (exact search)\n",
+        f"- Vectors indexed: {indexed}\n",
+    ]
+    return "".join(lines)
 
-**Embeddings:**
-- Dimension: {embeddings.shape[1] if embeddings is not None else 'N/A'}
-- Total vectors: {embeddings.shape[0]:,} if embeddings is not None else 'N/A'
 
-**Index:**
-- Type: FAISS Flat (exact search)
-- Vectors indexed: {faiss_index.ntotal:,} if faiss_index is not None else 'N/A'
-"""
-    return stats
-
-# Load models on startup
+# Load everything on startup
 load_models()
 
-# Create Gradio interface
+# UI
 with gr.Blocks(title="Lovdata Legal AI", theme=gr.themes.Soft()) as demo:
-    gr.Markdown("""
-    # 🏛️ Lovdata Legal AI
-    
-    Semantic search and analysis for Norwegian legal texts. This system uses AI to search through 
-    Norwegian laws and regulations, find similar legal provisions, and detect potential overlaps.
-    
-    **Data Source**: [Lovdata Public API](https://lovdata.no/pro/api-dokumentasjon)
-    
-    **GitHub**: [lovdata-legal-ai](https://github.com/Jakobkoding2/lovdata-legal-ai)
-    """)
-    
+    gr.Markdown(
+        """
+# 🏛️ Lovdata Legal AI
+
+Semantisk søk og analyse for norske lover og forskrifter.
+
+**Datakilde**: Lovdata Public API  
+**Repo**: https://github.com/Jakobkoding2/lovdata-legal-ai
+"""
+    )
+
     with gr.Tabs():
         with gr.Tab("🔍 Semantic Search"):
-            gr.Markdown("Search for legal provisions using natural language queries.")
-            
+            gr.Markdown("Søk i lover/forskrifter med naturlig språk.")
             with gr.Row():
                 with gr.Column():
-                    search_query = gr.Textbox(
+                    q = gr.Textbox(
                         label="Search Query",
-                        placeholder="e.g., 'ansvar for styret' or 'kontrakt og forpliktelser'",
-                        lines=2
+                        placeholder="f.eks. 'ansvar for styret' eller 'kontrakt og forpliktelser'",
+                        lines=2,
                     )
                     with gr.Row():
-                        search_top_k = gr.Slider(
-                            minimum=1,
-                            maximum=20,
-                            value=5,
-                            step=1,
-                            label="Number of Results"
-                        )
-                        search_min_sim = gr.Slider(
-                            minimum=0.0,
-                            maximum=1.0,
-                            value=0.7,
-                            step=0.05,
-                            label="Minimum Similarity"
-                        )
-                    search_button = gr.Button("Search", variant="primary")
-            
-            search_output = gr.Markdown(label="Results")
-            
-            search_button.click(
-                semantic_search,
-                inputs=[search_query, search_top_k, search_min_sim],
-                outputs=search_output
-            )
-            
+                        topk = gr.Slider(1, 20, value=5, step=1, label="Number of Results")
+                        minsim = gr.Slider(0.0, 1.0, value=0.7, step=0.05, label="Minimum Similarity")
+                    btn = gr.Button("Search", variant="primary")
+            out = gr.Markdown()
+            btn.click(semantic_search, inputs=[q, topk, minsim], outputs=out)
             gr.Examples(
                 examples=[
                     ["ansvar for styret", 5, 0.7],
                     ["kontrakt og forpliktelser", 5, 0.7],
                     ["forsikring og erstatning", 5, 0.7],
                 ],
-                inputs=[search_query, search_top_k, search_min_sim]
+                inputs=[q, topk, minsim],
             )
-        
+
         with gr.Tab("🔄 Overlap Detection"):
-            gr.Markdown("Analyze semantic overlap between two legal texts.")
-            
+            gr.Markdown("Analyser semantisk overlapp mellom to tekster.")
             with gr.Row():
                 with gr.Column():
-                    overlap_text1 = gr.Textbox(
-                        label="Text 1",
-                        placeholder="Enter first legal text...",
-                        lines=5
-                    )
+                    t1 = gr.Textbox(label="Text 1", lines=5)
                 with gr.Column():
-                    overlap_text2 = gr.Textbox(
-                        label="Text 2",
-                        placeholder="Enter second legal text...",
-                        lines=5
-                    )
-            
-            overlap_button = gr.Button("Analyze Overlap", variant="primary")
-            overlap_output = gr.Markdown(label="Analysis Results")
-            
-            overlap_button.click(
-                detect_overlap,
-                inputs=[overlap_text1, overlap_text2],
-                outputs=overlap_output
-            )
-        
+                    t2 = gr.Textbox(label="Text 2", lines=5)
+            btn2 = gr.Button("Analyze Overlap", variant="primary")
+            out2 = gr.Markdown()
+            btn2.click(detect_overlap, inputs=[t1, t2], outputs=out2)
+
         with gr.Tab("📊 Statistics"):
-            gr.Markdown("System information and statistics.")
-            
-            stats_button = gr.Button("Refresh Statistics")
-            stats_output = gr.Markdown(value=get_statistics())
-            
-            stats_button.click(
-                get_statistics,
-                inputs=[],
-                outputs=stats_output
-            )
-    
-    gr.Markdown("""
-    ---
-    
-    ### About
-    
-    This system was built autonomously using:
-    - **Data**: Lovdata public API (Norwegian laws and regulations)
-    - **Embeddings**: `paraphrase-multilingual-MiniLM-L12-v2`
-    - **Search**: FAISS vector index
-    - **Classification**: Random Forest (100% accuracy)
-    
-    **Note**: This is a demonstration system. For production use, please consult legal experts.
-    """)
+            gr.Markdown("Systeminfo og statistikk.")
+            btn3 = gr.Button("Refresh Statistics")
+            out3 = gr.Markdown(value=get_statistics())
+            btn3.click(get_statistics, inputs=[], outputs=out3)
+
+    gr.Markdown(
+        """
+---
+**Merk**: Demo-system. Ikke juridisk rådgivning.
+"""
+    )
 
 if __name__ == "__main__":
-    demo.launch()
+    # Bind to Render/Railway provided port
+    port = int(os.getenv("PORT", 7860))
+    demo.launch(server_name="0.0.0.0", server_port=port)
