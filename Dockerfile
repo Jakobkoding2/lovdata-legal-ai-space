@@ -13,8 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code and data
 COPY app.py .
-COPY data ./data
-COPY models ./models
+
 
 # Expose Gradio default port
 EXPOSE 7860
