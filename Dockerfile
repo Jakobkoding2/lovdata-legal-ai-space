@@ -1,23 +1,24 @@
-FROM python:3.11
+FROM python:3.11-slim
 
+# Work directory
 WORKDIR /app
 
-# Tools and libs many PyPI wheels expect
+# Basic system tools
 RUN apt-get update && apt-get install -y \
-    git ffmpeg curl && \
+    build-essential git curl ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
-# Stable pip toolchain
+# Upgrade pip + build tools
 RUN python -m pip install --upgrade pip setuptools wheel
 
+# Copy and install dependencies
 COPY requirements.txt .
-
-# If you need PyTorch, force CPU wheels (skip CUDA):
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt || true && \
-    pip install --no-cache-dir torch==2.4.1 --index-url https://download.pytorch.org/whl/cpu
+    pip install --no-cache-dir -r requirements.txt
 
+# Copy app code only
 COPY app.py .
 
+# Environment and start
 ENV PORT=7860
-CMD ["python","app.py"]
+CMD ["python", "app.py"]
