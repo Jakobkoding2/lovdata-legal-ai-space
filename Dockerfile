@@ -1,26 +1,23 @@
-FROM python:3.11-slim
+FROM python:3.11
 
 WORKDIR /app
 
-# Install system dependencies
+# Tools and libs many PyPI wheels expect
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    git ffmpeg curl && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
+# Stable pip toolchain
+RUN python -m pip install --upgrade pip setuptools wheel
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code and data
+# If you need PyTorch, force CPU wheels (skip CUDA):
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r requirements.txt || true && \
+    pip install --no-cache-dir torch==2.4.1 --index-url https://download.pytorch.org/whl/cpu
+
 COPY app.py .
 
-
-# Expose Gradio default port
-EXPOSE 7860
-
-# Set environment variable for Gradio
-ENV GRADIO_SERVER_NAME="0.0.0.0"
-ENV GRADIO_SERVER_PORT=7860
-
-# Run the application
-CMD ["python", "app.py"]
+ENV PORT=7860
+CMD ["python","app.py"]
