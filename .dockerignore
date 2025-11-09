@@ -1,0 +1,9 @@
+.git
+__pycache__/
+*.pyc
+.venv/
+data/
+models/
+*.tar*
+*.bz2
+.DS_Store
