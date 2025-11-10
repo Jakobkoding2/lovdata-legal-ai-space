@@ -7,12 +7,12 @@ import requests
 PORT = int(os.environ.get("PORT", 7860))
 HOST = "0.0.0.0"
 
-API_URL = os.environ.get("API_URL", "http://localhost:8000/ask_law")
+API_URL = os.getenv("BACKEND_URL", "http://localhost:8000/ask_law")
 
 
-def fetch_answer(question: str) -> str:
+def fetch_answer(user_input: str) -> str:
     try:
-        payload = {"question": question}
+        payload = {"question": user_input}
         response = requests.post(API_URL, json=payload, timeout=60)
         response.raise_for_status()
         data = response.json()
@@ -29,7 +29,7 @@ def predict(text: str) -> str:
 
 def build_ui():
     with gr.Blocks() as demo:
-        gr.Markdown("# LOVDATA Legal AI — HF Inference (router)")
+        gr.Markdown("# LOVDATA Legal AI — Backend Router")
         inp = gr.Textbox(label="Input text", lines=6, placeholder="Paste text here...")
         out = gr.Textbox(label="Output", interactive=False)
         btn = gr.Button("Run")

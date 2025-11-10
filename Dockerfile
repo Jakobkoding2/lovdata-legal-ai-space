@@ -15,5 +15,6 @@ COPY . /app
 RUN chmod +x /app/start.sh
 
 # Render will inject a PORT environment variable that the app listens on.
+# BACKEND_URL should be provided at runtime to point at the /ask_law backend API.
 EXPOSE 7860
 CMD ["./start.sh"]
