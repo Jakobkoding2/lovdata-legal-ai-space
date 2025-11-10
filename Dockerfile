@@ -15,5 +15,5 @@ COPY . /app
 RUN chmod +x /app/start.sh
 
 # Render will inject a PORT environment variable that the app listens on.
-EXPOSE 8080
+EXPOSE 7860
 CMD ["./start.sh"]
