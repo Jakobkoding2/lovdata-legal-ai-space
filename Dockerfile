@@ -1,24 +1,25 @@
-FROM python:3.11-slim
-
-# Work directory
+# Minimal Dockerfile tuned for Render web services
+FROM python:3.10-slim
+ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
-# Basic system tools
-RUN apt-get update && apt-get install -y \
-    build-essential git curl ffmpeg && \
-    rm -rf /var/lib/apt/lists/*
+# Install minimal system deps (kept small)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip + build tools
-RUN python -m pip install --upgrade pip setuptools wheel
+# Copy only what is needed for pip install first (speeds rebuilds)
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy and install dependencies
-COPY requirements.txt .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt
+# Copy the rest of the source
+COPY . /app
 
-# Copy app code only
-COPY app.py .
+# Ensure start script is executable
+RUN chmod +x /app/start.sh
 
-# Environment and start
-ENV PORT=7860
-CMD ["python", "app.py"]
+# Render will inject a PORT environment variable that the app listens on.
+EXPOSE 8080
+
+# Default start command for the container-based service on Render
+CMD ["./start.sh"]

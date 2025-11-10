@@ -1,8 +1,4 @@
-gradio>=4.0.0
-sentence-transformers>=2.2.0
-faiss-cpu>=1.7.4
-scikit-learn>=1.3.0
-joblib>=1.3.0
-pandas>=2.0.0
-pyarrow>=14.0.0
-numpy>=1.24.0
+gradio
+requests
+# Note: transformers/torch are intentionally NOT included to keep the image small.
+# If you intend to load a local model on Render, add transformers and a CPU torch wheel here.
