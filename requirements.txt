@@ -1,4 +1,2 @@
 gradio
 requests
-# Note: transformers/torch are intentionally NOT included to keep the image small.
-# If you intend to load a local model on Render, add transformers and a CPU torch wheel here.
