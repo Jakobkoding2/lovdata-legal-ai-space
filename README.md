@@ -1,65 +1,97 @@
----
-title: Lovdata Legal AI
-emoji: 🏛️
-colorFrom: blue
-colorTo: green
-sdk: gradio
-sdk_version: 4.44.0
-app_file: app.py
-pinned: false
-license: mit
----
+# LovAI – Norwegian Legal AI Frontend
 
-# 🏛️ Lovdata Legal AI
+LovAI is a production-ready frontend for the Lovdata Retrieval-Augmented Generation (RAG) backend. It helps
+legal professionals explore Norwegian legislation through hybrid dense + lexical search, reranking, and
+citation-backed answers.
 
-Semantic search and analysis for Norwegian legal texts powered by AI.
+## ✨ Highlights
 
-## 🚀 Quick Deploy
+- **Responsive React UI** built with Vite + TypeScript, optimized for fast local iteration and static hosting.
+- **Hybrid RAG controls**: toggle dense/lexical hybrid retrieval, reranking, citation enforcement, and top-k.
+- **Rich result experience**: grounded answer view, supporting evidence, citation list with deep links, and
+  live latency metrics.
+- **Resilient networking**: aborts in-flight requests on new submissions, surfaces backend errors, and normalizes
+  metrics coming from FastAPI.
 
-Deploy this application permanently with one click:
+## 🧱 Repository layout
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/new?template=https://github.com/Jakobkoding2/lovdata-legal-ai-space)
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Jakobkoding2/lovdata-legal-ai-space)
-
-**Or try it locally:**
-```bash
-git clone https://github.com/Jakobkoding2/lovdata-legal-ai-space.git
-cd lovdata-legal-ai-space
-docker-compose up
+```
+frontend/       # Vite + React application
+└─ src/
+   ├─ components/   # Form, results, citation UI building blocks
+   ├─ hooks/        # API integrations using TanStack Query
+   ├─ lib/          # Typed client for the Lovdata RAG API
+   └─ styles.css    # Global styling
 ```
 
-Visit `http://localhost:7860`
+Backend code for the Lovdata RAG stack lives in the separate `lovdata_rag` Python package and FastAPI server as
+mentioned in the project brief. Point this frontend at that backend via `VITE_API_BASE_URL`.
 
-## ✨ Features
+## 🚀 Getting started
 
-- **Semantic Search**: Find relevant legal provisions using natural language queries
-- **Overlap Detection**: Analyze semantic relationships between legal texts
-- **Real-time Analysis**: Instant results powered by FAISS vector search
-- **20,000+ Legal Texts**: Norwegian laws and regulations from Lovdata
+### 1. Install dependencies
 
-## 📊 Data
+```bash
+cd frontend
+npm install
+```
 
-This system processes over 338,000 legal text units from Norwegian laws and regulations, sourced from the [Lovdata Public API](https://lovdata.no/pro/api-dokumentasjon).
+### 2. Configure environment
 
-## 🛠️ Technology
+Create a `.env` file inside `frontend/` to point at the running FastAPI instance:
 
-- **Embeddings**: `paraphrase-multilingual-MiniLM-L12-v2` (384-dim)
-- **Vector Search**: FAISS index for efficient similarity search
-- **Classification**: Random Forest classifier (100% accuracy)
-- **Interface**: Gradio web application
-- **Deployment**: Docker, Railway, Render, Fly.io, Google Cloud Run
+```
+VITE_API_BASE_URL=http://localhost:8000
+```
 
-## 📖 Documentation
+The backend should expose at least `POST /search` with the payload described in the project brief.
 
-- **Full Documentation**: [GitHub Repository](https://github.com/Jakobkoding2/lovdata-legal-ai)
-- **Deployment Guide**: [DEPLOY.md](./DEPLOY.md)
-- **API Documentation**: [README.md](https://github.com/Jakobkoding2/lovdata-legal-ai/blob/master/README.md)
+### 3. Run locally
 
-## ⚠️ Note
+```bash
+npm run dev
+```
 
-This is a demonstration system built autonomously. For production legal applications, please consult qualified legal experts.
+Open the printed URL (defaults to [http://localhost:5173](http://localhost:5173)).
+
+### 4. Build for production
+
+```bash
+npm run build
+```
+
+The static site is emitted to `frontend/dist/` and can be served by any CDN or static host. To preview the
+production build locally:
+
+```bash
+npm run preview
+```
+
+## 🧪 Testing the backend connection
+
+The UI calls `POST /search` with the following JSON shape:
+
+```json
+{
+  "query": "ansvar for styret",
+  "top_k": 10,
+  "use_hybrid": true,
+  "with_citations": true,
+  "rerank": true
+}
+```
+
+Responses are expected to contain at least `answer`, with optional `citations`, `hits`, and `metrics` objects.
+Any snake_case latency values are normalized automatically. Backend error payloads bubble up to the UI so that
+operational issues surface quickly.
+
+## 📦 Deployment notes
+
+- Ship the built assets (`frontend/dist`) behind a CDN or static host (e.g., Vercel, Netlify, CloudFront).
+- Configure the backend origin URL via `VITE_API_BASE_URL` at deploy time.
+- For Docker-based hosting, add a Node build stage to compile the frontend and serve the static bundle with
+  Nginx or another HTTP server.
 
 ## 📝 License
 
-MIT License - See [LICENSE](./LICENSE) for details
+MIT License – see [LICENSE](./LICENSE) if present in the parent repository.
